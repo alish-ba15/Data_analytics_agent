@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+test_executor.py
+test_full_architecture.py
+test_llm.py
+test_report_generator.py
+test_self_healing.py
+test_ui_and_pdf.py

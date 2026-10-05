@@ -46,11 +46,15 @@ class DatasetProfiler:
 
         # Summary statistics
         numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+        columns_list = df.columns.tolist()
+
+        suggested_prompts = self.generate_suggested_prompts(df)
 
         return {
             "shape": (total_rows, total_cols),
             "total_rows": total_rows,
             "total_columns": total_cols,
+            "columns": columns_list,
             "duplicate_rows": duplicate_count,
             "dtypes": dtypes_str,
             "missing_counts": missing_counts,
@@ -58,4 +62,63 @@ class DatasetProfiler:
             "columns_with_missing": cols_with_nulls,
             "numeric_columns": numeric_cols,
             "detected_issues": detected_issues,
+            "suggested_prompts": suggested_prompts,
         }
+
+    def generate_suggested_prompts(self, df: pd.DataFrame) -> list:
+        """
+        Dynamically generates dataset-tailored natural language prompt suggestions
+        based on column names, data types, and contents.
+        """
+        cols = df.columns.tolist()
+        numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+        categorical_cols = df.select_dtypes(include=["object", "string", "category"]).columns.tolist()
+
+        # Identify date columns
+        date_cols = [c for c in cols if any(k in c.lower() for k in ["date", "time", "year", "month", "day"])]
+
+        # Filter out ID columns
+        clean_numeric = [c for c in numeric_cols if "id" not in c.lower()]
+        if not clean_numeric:
+            clean_numeric = numeric_cols or ["value"]
+
+        clean_cat = [c for c in categorical_cols if "id" not in c.lower()]
+        if not clean_cat:
+            clean_cat = categorical_cols or ["category"]
+
+        val_col = clean_numeric[0] if clean_numeric else "total value"
+        cat_col = clean_cat[0] if clean_cat else "category"
+        cat_col_2 = clean_cat[1] if len(clean_cat) > 1 else cat_col
+        date_col = date_cols[0] if date_cols else None
+
+        prompts = []
+
+        # 1. Top N query
+        if clean_cat and clean_numeric:
+            prompts.append(f"What are the top 5 {cat_col}s by highest {val_col}?")
+        else:
+            prompts.append(f"What are the top 5 entries by highest {val_col}?")
+
+        # 2. Time-series or trend progression query
+        if date_col:
+            prompts.append(f"Analyze key trends over {date_col} and show period progression.")
+        elif len(clean_numeric) > 1:
+            prompts.append(f"Analyze correlation between {clean_numeric[0]} and {clean_numeric[1]}.")
+        else:
+            prompts.append("Analyze key trends over time and show period progression.")
+
+        # 3. Categorical comparison query
+        if clean_cat and clean_numeric:
+            prompts.append(f"Compare average {val_col} across {cat_col} groups.")
+        else:
+            prompts.append("Compare average values across primary category groups.")
+
+        # 4. Distribution / Segment query
+        if len(clean_cat) > 1:
+            prompts.append(f"Show overall percentage distribution across {cat_col_2} segments.")
+        elif clean_cat:
+            prompts.append(f"Show overall percentage distribution across {cat_col} segments.")
+        else:
+            prompts.append("Show overall percentage distribution across segments.")
+
+        return prompts

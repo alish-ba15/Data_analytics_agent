@@ -1,4 +1,6 @@
 import os
+import traceback
+from backend.main import run_full_analysis_pipeline
 import sys
 from typing import Optional
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -33,6 +35,40 @@ UPLOAD_DIR = "data"
 GENERATED_DIR = "generated"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(GENERATED_DIR, exist_ok=True)
+
+from backend.data_handler import DataHandler
+from backend.profiler import DatasetProfiler
+
+
+@app.get("/api/profile-default")
+async def profile_default():
+    """Returns dataset profile and dynamic prompt suggestions for default dataset."""
+    dataset_path = "data/retail_store_sales.csv"
+    if not os.path.exists(dataset_path):
+        raise HTTPException(status_code=404, detail="Default dataset not found.")
+    dh = DataHandler()
+    dh.load_csv(dataset_path)
+    profiler = DatasetProfiler()
+    profile_data = profiler.profile(dh.df)
+    profile_data["filename"] = "retail_store_sales.csv"
+    return JSONResponse(content=profile_data)
+
+
+@app.post("/api/profile")
+async def profile_file(file: UploadFile = File(...)):
+    """Profiles uploaded CSV file and returns schema + dataset-specific prompt suggestions."""
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+    save_path = os.path.join(UPLOAD_DIR, f"temp_{file.filename}")
+    content = await file.read()
+    with open(save_path, "wb") as f:
+        f.write(content)
+    dh = DataHandler()
+    dh.load_csv(save_path)
+    profiler = DatasetProfiler()
+    profile_data = profiler.profile(dh.df)
+    profile_data["filename"] = file.filename
+    return JSONResponse(content=profile_data)
 
 
 @app.post("/api/analyze")
@@ -90,10 +126,12 @@ async def analyze_data(
             "report_content": pipeline_res.get("report_content"),
         }
         return JSONResponse(content=response_data)
-
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline execution error: {str(e)}")
-
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Pipeline execution error: {type(e).__name__}: {str(e)}")
 
 @app.get("/api/chart")
 @app.get("/analysis_chart.png")

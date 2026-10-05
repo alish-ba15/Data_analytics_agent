@@ -247,7 +247,11 @@ export default function App() {
               )}
 
               {/* Input Query & Drag-Drop Card */}
-              <QueryInput onSubmit={handleAnalyze} isAnalyzing={isAnalyzing} />
+              <QueryInput
+                onSubmit={handleAnalyze}
+                isAnalyzing={isAnalyzing}
+                fileProfile={analysisData?.initial_profile}
+              />
 
               {/* Live Pipeline Steps Progress Tracker */}
               <div ref={progressRef}>

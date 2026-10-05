@@ -33,85 +33,33 @@ class LLMHandler:
 
         self._initialize_provider()
 
+    def _setup_mock_provider(self):
+        """Set up mock provider fallback."""
+        self.provider = "mock"
+        self.llm = None
+
     def _initialize_provider(self):
         # Check explicit environment variable LLM_PROVIDER or PROVIDER
         env_provider = os.getenv("LLM_PROVIDER") or os.getenv("PROVIDER")
         target_provider = (self.provider or env_provider or "").lower()
 
-        gemini_key = self.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        openai_key = self.api_key or os.getenv("OPENAI_API_KEY")
         groq_key = self.api_key or os.getenv("GROQ_API_KEY")
 
         if target_provider == "mock":
             self._setup_mock_provider()
             return
 
-        if target_provider == "groq":
-            if groq_key and self._setup_groq_provider(groq_key):
-                return
-
-        if target_provider == "gemini":
-            if gemini_key and self._setup_gemini_provider(gemini_key):
-                return
-
-        if target_provider == "openai":
-            if openai_key and self._setup_openai_provider(openai_key):
-                return
-
-        # Auto-detect available keys (prefer Groq, then Gemini, then OpenAI)
         if groq_key and self._setup_groq_provider(groq_key):
             return
 
-        if gemini_key and self._setup_gemini_provider(gemini_key):
-            return
-
-        if openai_key and self._setup_openai_provider(openai_key):
-            return
-
-        # Fallback to mock provider if no API keys are found or initialization failed
-        print("[LLMHandler Info] No active LLM API keys found or provider setup failed. Using fallback mock code generator.")
+        # Fall back to mock provider if no provider initialized
         self._setup_mock_provider()
 
-    def _setup_mock_provider(self):
-        """Set provider to mock."""
-        self.provider = "mock"
-        self.llm = None
-
-    def _setup_gemini_provider(self, api_key: str) -> bool:
-        """Initialize Google Gemini via LangChain or google-generativeai."""
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            model = self.model_name or "gemini-3.6-flash"
-            self.llm = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=api_key,
-                temperature=self.temperature
-            )
-            self.provider = "gemini"
-            return True
-        except Exception as e:
-            print(f"[LLMHandler Warning] Failed to initialize Gemini provider: {e}")
-            return False
-
-    def _setup_openai_provider(self, api_key: str) -> bool:
-        """Initialize OpenAI via LangChain."""
-        try:
-            from langchain_openai import ChatOpenAI
-            model = self.model_name or "gpt-4o-mini"
-            self.llm = ChatOpenAI(
-                model=model,
-                openai_api_key=api_key,
-                temperature=self.temperature
-            )
-            self.provider = "openai"
-            return True
-        except Exception as e:
-            print(f"[LLMHandler Warning] Failed to initialize OpenAI provider: {e}")
-            return False
-
     def _setup_groq_provider(self, api_key: str) -> bool:
-        """Initialize Groq provider via ChatGroq."""
+        """Initialize Groq provider via ChatGroq or direct Groq SDK."""
         model = self.model_name or os.getenv("GROQ_MODEL") or "openai/gpt-oss-120b"
+        
+        # 1. Try LangChain ChatGroq first
         try:
             from langchain_groq import ChatGroq
             self.llm = ChatGroq(
@@ -122,18 +70,20 @@ class LLMHandler:
             self.provider = "groq"
             return True
         except Exception as e:
-            try:
-                from langchain_groq import ChatGroq
-                self.llm = ChatGroq(
-                    model="qwen/qwen3.8-27b",
-                    groq_api_key=api_key,
-                    temperature=self.temperature
-                )
-                self.provider = "groq"
-                return True
-            except Exception as e2:
-                print(f"[LLMHandler Warning] Failed to initialize Groq provider: {e} | {e2}")
-                return False
+            print(f"[LLMHandler] ChatGroq initialization skipped/failed: {e}. Trying direct groq.Groq SDK...")
+
+        # 2. Try official direct groq.Groq SDK (bypasses langchain / _uuid_utils DLL issues)
+        try:
+            import groq
+            client = groq.Groq(api_key=api_key)
+            # Test model availability
+            self.llm = client
+            self.groq_model = model
+            self.provider = "groq"
+            return True
+        except Exception as e2:
+            print(f"[LLMHandler Warning] Failed to initialize Groq provider: {e2}")
+            return False
 
 
     def generate_code(self, schema_info: dict, sample_data: list, user_query: str) -> Dict[str, Any]:
@@ -262,17 +212,54 @@ plt.close()
 
         if self.provider == "mock" or self.llm is None:
             user_query = pipeline_result.get("user_query", "")
-            return f"# 📊 Data Analysis Report\n\n## Executive Summary\nProcessed query: '{user_query}'.\n"
+            return f"# Data Analysis Report\n\n## Executive Summary\nProcessed query: '{user_query}'.\n"
 
         try:
             return self._invoke_llm(report_prompt)
         except Exception as e:
             print(f"[LLMHandler Warning] Full report generation failed: {e}")
-            return f"# 📊 Data Analysis Report\n\n## Executive Summary\n{pipeline_result.get('final_answer', '')}\n"
+            return f"# Data Analysis Report\n\n## Executive Summary\n{pipeline_result.get('final_answer', '')}\n"
+
+    def _generate_mock_response(self, schema_info: dict, user_query: str) -> str:
+        """Fallback mock LLM response generator."""
+        return f"""### Explanation
+Analyzing data to answer: {user_query}
+
+```python
+result = df.head(10)
+```
+"""
 
     def _invoke_llm(self, user_prompt: str) -> str:
-        """Invoke configured LangChain LLM instance with system prompt and user prompt."""
+        """Invoke configured LLM instance (LangChain or direct Groq SDK) with system prompt and user prompt."""
+        if self.llm is None:
+            return self._generate_mock_response({}, user_prompt)
+
         try:
+            # Check if self.llm is direct groq.Groq client
+            if hasattr(self.llm, "chat") and hasattr(self.llm.chat, "completions"):
+                primary_model = getattr(self, "groq_model", None) or os.getenv("GROQ_MODEL") or "openai/gpt-oss-120b"
+                models_to_try = [primary_model, "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
+                last_err = None
+                for model in models_to_try:
+                    try:
+                        res = self.llm.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content": SYSTEM_PROMPT},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=self.temperature
+                        )
+                        return res.choices[0].message.content or ""
+                    except Exception as model_err:
+                        last_err = model_err
+                        print(f"[LLMHandler Warning] Model {model} failed/rate limited: {model_err}. Trying next fallback...")
+
+                print(f"[LLMHandler Error] All Groq models failed. Last error: {last_err}")
+                return self._generate_mock_response({}, user_prompt)
+
+            # Standard LangChain invoke
             from langchain_core.messages import SystemMessage, HumanMessage
             messages = [
                 SystemMessage(content=SYSTEM_PROMPT),
@@ -297,20 +284,7 @@ plt.close()
             print(f"[LLMHandler Error] LLM invocation failed: {e}. Falling back to mock generator.")
             return self._generate_mock_response({}, "Fallback query due to LLM invocation error")
 
-    def _generate_mock_response(self, schema_info: dict, user_query: str) -> str:
-        """Generate mock response for offline/testing purposes."""
-        columns = schema_info.get("columns", [])
-        col_ref = f"['{columns[0]}']" if columns else ""
-        
-        return f"""### Explanation
-This is generated analysis code based on your query: "{user_query}".
-It filters and summarizes the loaded DataFrame `df` storing the output in `result`.
 
-```python
-# Analysis generated for: {user_query}
-result = df.describe() if {bool(columns)} else df.head()
-```
-"""
 
     @staticmethod
     def extract_code_and_explanation(response_text: Any) -> Dict[str, str]:

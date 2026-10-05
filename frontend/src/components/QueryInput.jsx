@@ -1,17 +1,82 @@
 import React, { useState, useRef } from 'react';
 import { Upload, Play, FileSpreadsheet, X, HelpCircle, Sparkles } from 'lucide-react';
 
-export default function QueryInput({ onSubmit, isAnalyzing }) {
+export default function QueryInput({ onSubmit, isAnalyzing, fileProfile, defaultPrompts }) {
   const [query, setQuery] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
-  const fileInputRef = useRef(null);
-
-  const sampleQueries = [
+  const [sampleQueries, setSampleQueries] = useState(defaultPrompts || [
     "What are the top 5 entries by highest total value?",
     "Analyze key trends over time and show period progression.",
     "Compare average values across primary category groups.",
     "Show overall percentage distribution across segments."
-  ];
+  ]);
+  const fileInputRef = useRef(null);
+
+  // Helper to construct dynamic prompts from CSV column headers
+  const generatePromptsFromHeaders = (headers) => {
+    if (!headers || headers.length === 0) return;
+    const lower = headers.map(h => h.toLowerCase());
+
+    const dateCol = headers.find((h, i) =>
+      ['date', 'time', 'year', 'month', 'day'].some(k => lower[i].includes(k))
+    );
+
+    const catCols = headers.filter((h, i) =>
+      !lower[i].includes('id') &&
+      !['date', 'time', 'year', 'month', 'day'].some(k => lower[i].includes(k))
+    );
+
+    const metricCol = headers.find((h, i) =>
+      ['spent', 'price', 'total', 'sales', 'amount', 'cost', 'revenue', 'quantity', 'score', 'rate', 'grade', 'value'].some(k => lower[i].includes(k))
+    ) || catCols[catCols.length - 1] || headers[headers.length - 1];
+
+    const primaryCat = catCols[0] || 'Category';
+    const secondaryCat = catCols[1] || catCols[0] || 'Segment';
+
+    const dynamic = [
+      `What are the top 5 ${primaryCat}s by highest ${metricCol || 'total value'}?`,
+      dateCol
+        ? `Analyze key trends over ${dateCol} and show period progression.`
+        : `Analyze key trends over time and show period progression.`,
+      `Compare average ${metricCol || 'value'} across ${primaryCat} groups.`,
+      `Show overall percentage distribution across ${secondaryCat} segments.`
+    ];
+    setSampleQueries(dynamic);
+  };
+
+  // Fetch backend default profile prompts on initial mount if available
+  useEffect(() => {
+    if (fileProfile?.suggested_prompts) {
+      setSampleQueries(fileProfile.suggested_prompts);
+    } else {
+      fetch('/api/profile-default')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.suggested_prompts) {
+            setSampleQueries(data.suggested_prompts);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [fileProfile]);
+
+  // Read file headers client-side whenever selectedFile changes
+  useEffect(() => {
+    if (selectedFile) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        if (text) {
+          const firstLine = text.split(/\r?\n/)[0];
+          if (firstLine) {
+            const headers = firstLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            generatePromptsFromHeaders(headers);
+          }
+        }
+      };
+      reader.readAsText(selectedFile.slice(0, 4096));
+    }
+  }, [selectedFile]);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {

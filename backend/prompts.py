@@ -181,10 +181,17 @@ def build_final_summary_prompt(
     execution_result: Any
 ) -> str:
     import json
-    try:
-        result_formatted = json.dumps(execution_result, indent=2, default=str)
-    except Exception:
-        result_formatted = str(execution_result)
+    if isinstance(execution_result, list) and len(execution_result) > 20:
+        truncated = execution_result[:20]
+        result_formatted = json.dumps(truncated, indent=2, default=str) + f"\n... (showing first 20 of {len(execution_result)} total records)"
+    else:
+        try:
+            result_formatted = json.dumps(execution_result, indent=2, default=str)
+        except Exception:
+            result_formatted = str(execution_result)
+
+    if len(result_formatted) > 2500:
+        result_formatted = result_formatted[:2500] + "\n... [truncated for brevity]"
 
     prompt = f"""USER QUESTION:
 "{user_query}"
@@ -269,10 +276,17 @@ def build_report_prompt(
     execution_result = pipeline_result.get("execution_result", None)
     final_answer = pipeline_result.get("final_answer", "")
 
-    try:
-        exec_formatted = json.dumps(execution_result, indent=2, default=str)
-    except Exception:
-        exec_formatted = str(execution_result)
+    if isinstance(execution_result, list) and len(execution_result) > 20:
+        truncated = execution_result[:20]
+        exec_formatted = json.dumps(truncated, indent=2, default=str) + f"\n... (showing first 20 of {len(execution_result)} total records)"
+    else:
+        try:
+            exec_formatted = json.dumps(execution_result, indent=2, default=str)
+        except Exception:
+            exec_formatted = str(execution_result)
+
+    if len(exec_formatted) > 2500:
+        exec_formatted = exec_formatted[:2500] + "\n... [truncated for brevity]"
 
     prompt = f"""USER QUESTION:
 "{user_query}"

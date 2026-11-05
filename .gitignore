@@ -1,17 +1,31 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Virtual environments
-.venv
+# Virtual environments and local secrets
+.venv/
+venv/
+env/
 .env
-test_executor.py
-test_full_architecture.py
-test_llm.py
-test_report_generator.py
-test_self_healing.py
-test_ui_and_pdf.py
+.env.*
+!.env.example
+
+# Jupyter and local tooling
+.ipynb_checkpoints/
+.ipython/
+.vscode/
+.idea/
+.DS_Store
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Runtime uploads and generated artifacts
+data/temp_*.csv
+data/upload_*.csv
+generated/*
